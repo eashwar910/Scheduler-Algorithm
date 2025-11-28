@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/eashwarsiddha/Documents/UoNM/Year2/Sem1/OSC/Coursework/Code",
+      "program": "/Users/eashwarsiddha/Documents/UoNM/Year2/Sem1/OSC/Coursework/Code/build/Debug/outDebug"
+    }
+  ]
+}
