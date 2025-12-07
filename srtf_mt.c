@@ -244,7 +244,7 @@ int main() {
             printf("Invalid input (Not an integer). Please try again\n");
             sched.n = 0; // Force loop continuation
         } else if (sched.n < 1 || sched.n > 10) {
-            printf("Invalid input: Processes Must be between 1 to 10. Please try again\n");
+            printf("Invalid input: Processes Must be between a positive integer. Please try again\n");
         }
     } while (sched.n < 1 || sched.n > 10);
 
