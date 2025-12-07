@@ -94,6 +94,7 @@ struct Scheduler {
     int active_process_index; 
     
     struct process *processes;
+    int *executionHistory;
     
     MutexHandle lock;          // Protects all shared state
     CondHandle scheduler_cond; // Scheduler waits on this for worker to finish a tick
@@ -101,13 +102,73 @@ struct Scheduler {
 
 struct Scheduler sched;
 
+// Function to print the final Gantt Chart
+void printGanttChart() { 
+    printf("\nFinal Gantt Chart:\n");
+
+    int i;
+    int duration = sched.current_time;
+    int *history = sched.executionHistory;
+
+    // 1. Top border of Gantt Chart
+    printf(" ");
+    for(i = 0; i < duration; i++) {
+        if(i == 0 || history[i] != history[i-1]) {
+            printf("+"); 
+        }
+        printf("---");
+    }
+    printf("+\n");
+
+    // 2. Process Labels (Middle)
+    printf(" ");
+    for(i = 0; i < duration; i++) {
+        if(i == 0 || history[i] != history[i-1]) {
+            printf("|");
+        }
+
+        if (history[i] == -1) {
+            printf("///"); // Idle case 
+        } else {
+            printf("P%-2d", history[i]);
+        }
+    }
+    printf("|\n");
+
+    // 3. Bottom border
+    printf(" ");
+    for(i = 0; i < duration; i++) {
+        if(i == 0 || history[i] != history[i-1]) {
+            printf("+");
+        }
+        printf("---");
+    }
+    printf("+\n");
+
+    // 4. Timeline Numbers
+    printf(" ");
+    printf("0"); // Starts at 0
+    
+    for(i = 0; i < duration; i++) {
+        // Only print the number when the process changes or at the very end
+        if (i < duration - 1 && history[i+1] == history[i]) {
+            printf("   "); // Spaces for continuity
+        } else { 
+            // Prints at the end of a block
+            int nextTime = i + 1;
+            if(nextTime < 10) printf("   %d", nextTime);
+            else printf("  %d", nextTime);
+        }
+    }
+    printf("\n");
+}
+
 // worker thread function
 THREAD_FUNC_RETURN Process_Worker(THREAD_FUNC_ARG arg) {
     struct process *p = (struct process *)arg;
     int my_index = -1;
 
     // Find my index to verify identity against scheduler
-    // (This is just a helper, ideally index is passed in args)
     lock_mutex(&sched.lock);
     for(int i=0; i<sched.n; i++) {
         if(&sched.processes[i] == p) {
@@ -125,7 +186,7 @@ THREAD_FUNC_RETURN Process_Worker(THREAD_FUNC_ARG arg) {
             wait_cond(&p->my_cond, &sched.lock);
         }
       
-        // If we are resumed but completed (shouldn't happen in this logic, but safe guard)
+        // If we are resumed but completed
         if (p->remaining_time <= 0) {
             sched.active_process_index = -1; // Yield back
             signal_cond(&sched.scheduler_cond);
@@ -148,7 +209,7 @@ THREAD_FUNC_RETURN Process_Worker(THREAD_FUNC_ARG arg) {
         // Check completion logic inside the locked region
         if (p->remaining_time == 0) {
             p->is_completed = true;
-            p->completion_time = sched.current_time + 1; // +1 because current_time is at start of tick
+            p->completion_time = sched.current_time + 1; 
             
             // Calculate Metrics
             p->turnaround_time = p->completion_time - p->arrival_time;
@@ -172,34 +233,68 @@ int main() {
     init_mutex(&sched.lock);
     init_cond(&sched.scheduler_cond);
     
-    printf("Enter number of processes: ");
-    if (scanf("%d", &sched.n) != 1 || sched.n <= 0) {
-        return 1;
-    }
+    // --- START INPUT VALIDATION ---
+    // 1. Validate number of processes (1 to 10)
+    do {
+        printf("Enter number of processes (1-10): ");
+        if (scanf("%d", &sched.n) != 1) {
+            // Clear input buffer for non-integer input
+            int c;
+            while ((c = getchar()) != '\n' && c != EOF);
+            printf("Invalid input (Not an integer). Please try again\n");
+            sched.n = 0; // Force loop continuation
+        } else if (sched.n < 1 || sched.n > 10) {
+            printf("Invalid input: Processes Must be between 1 to 10. Please try again\n");
+        }
+    } while (sched.n < 1 || sched.n > 10);
 
     sched.processes = (struct process *)malloc(sizeof(struct process) * sched.n);
+    // ALLOCATION FOR GANTT CHART HISTORY (Assuming max duration 1000 for safety)
+    sched.executionHistory = (int *)malloc(sizeof(int) * 1000);
+    
     sched.current_time = 0;
     sched.completed_count = 0;
-    sched.active_process_index = -1; // No one is running initially
+    sched.active_process_index = -1; 
 
-    // Input & Thread Creation
+    // Input & Thread Creation with Validation
     for (int i = 0; i < sched.n; i++) {
         sched.processes[i].pid = i + 1;
-        printf("Enter arrival time P%d: ", i + 1);
-        scanf("%d", &sched.processes[i].arrival_time);
-        printf("Enter burst time P%d: ", i + 1);
-        scanf("%d", &sched.processes[i].burst_time);
+
+        // 2. Validate arrival time (>= 0)
+        do {
+            printf("Enter arrival time P%d: ", i + 1);
+            if (scanf("%d", &sched.processes[i].arrival_time) != 1) {
+                int c;
+                while ((c = getchar()) != '\n' && c != EOF);
+                printf("Invalid input (Not an integer). Please try again\n");
+                sched.processes[i].arrival_time = -1; // Force loop continuation
+            } else if (sched.processes[i].arrival_time < 0) {
+                printf("Invalid input: Arrival time cannot be negative. Please try again\n");
+            }
+        } while (sched.processes[i].arrival_time < 0);
+
+
+        // 3. Validate burst time (> 0)
+        do {
+            printf("Enter burst time P%d: ", i + 1);
+            if (scanf("%d", &sched.processes[i].burst_time) != 1) {
+                int c;
+                while ((c = getchar()) != '\n' && c != EOF);
+                printf("Invalid input (Not an integer). Please try again\n");
+                sched.processes[i].burst_time = 0; // Force loop continuation
+            } else if (sched.processes[i].burst_time <= 0) {
+                printf("Invalid input: Burst time must be positive. Please try again\n");
+            }
+        } while (sched.processes[i].burst_time <= 0);
 
         sched.processes[i].remaining_time = sched.processes[i].burst_time;
         sched.processes[i].start_time = -1;
         sched.processes[i].is_completed = false;
         
-        // Initialize per-process condition variable
         init_cond(&sched.processes[i].my_cond);
-        
-        // Create the thread (It will immediately wait on its cond var)
         create_thread(&sched.processes[i].thread_id, Process_Worker, &sched.processes[i]);
     }
+    // --- END INPUT VALIDATION ---
 
     printf("\n%-6s %-12s %-12s %-15s\n", "Time", "Process ID", "Status", "Remaining Time");
 
@@ -230,29 +325,29 @@ int main() {
             }
         }
 
+        // *** GANTT CHART RECORDING ***
         if (min_index != -1) {
-            // Found a process to run
+            sched.executionHistory[sched.current_time] = sched.processes[min_index].pid;
+        } else {
+            sched.executionHistory[sched.current_time] = -1; // IDLE
+        }
+        // *****************************
+
+        if (min_index != -1) {
             struct process *p = &sched.processes[min_index];
 
-            // Print status
             if (p->remaining_time == p->burst_time || prev_running_pid != p->pid) {
                 printf("%-6d P%-11d %-12s %-15d\n", sched.current_time, p->pid, "Running", p->remaining_time);
             }
             prev_running_pid = p->pid;
 
-            // Set global flag indicating who should run
             sched.active_process_index = min_index;
-            
-            // Wake up THAT specific worker thread
             signal_cond(&p->my_cond);
             
-            // Wait for the worker to finish its time slice
-            // The scheduler sleeps here while the worker runs
             while (sched.active_process_index != -1) {
                 wait_cond(&sched.scheduler_cond, &sched.lock);
             }
             
-            // Worker has finished 1 tick and signaled us back
             if (p->is_completed) {
                 printf("%-6d P%-11d %-12s %-15d\n", sched.current_time + 1, p->pid, "Completed", 0);
             }
@@ -262,7 +357,6 @@ int main() {
             printf("%-6d %-12s %-12s %-15s\n", sched.current_time, "IDLE", "-", "-");
         }
 
-        // Advance time
         sched.current_time++;
         unlock_mutex(&sched.lock);
     }
@@ -288,8 +382,12 @@ int main() {
     printf("\nAverage Turnaround Time = %.2f\n", sum_tat / sched.n);
     printf("Average Waiting Time = %.2f\n", sum_wt / sched.n);
 
+    // Call the requested Gantt Chart function
+    printGanttChart();
+
     // Free resources
     free(sched.processes);
+    free(sched.executionHistory); 
     destroy_mutex(&sched.lock);
     destroy_cond(&sched.scheduler_cond);
 
